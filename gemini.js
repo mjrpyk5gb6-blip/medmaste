@@ -15,7 +15,7 @@ async function call(input,o={},json){const g=gget();if(!g.key)throw err("no_key"
  const b=JSON.stringify(await body(input,o,json));const list=[g.model||MODELS[0],...MODELS].filter((v,i,a)=>v&&a.indexOf(v)==i);let last;
  for(const m of list){const stream=!!o.onText&&!json;const url=`https://generativelanguage.googleapis.com/v1beta/models/${m}:${stream?"streamGenerateContent?alt=sse":"generateContent"}`;
   const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":g.key},body:b});
-  if(r.status==404){last=err("model","モデルが見つかりません："+m);continue}
+  if(r.status==404||r.status>=500){last=err("model",r.status==404?"モデルが見つかりません："+m:"Geminiが混雑中です。少し時間をおいてください");continue}
   if(r.status==429)throw err("limit","Geminiの無料枠の上限です。少し時間をおいてください");
   if(r.status==400||r.status==403){const t=await r.text();throw err("key",/API key|API_KEY/i.test(t)?"APIキーが正しくありません":"Geminiエラー："+t.slice(0,120))}
   if(!r.ok)throw err("http","Geminiエラー（"+r.status+"）");
