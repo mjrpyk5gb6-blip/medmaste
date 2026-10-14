@@ -96,4 +96,49 @@ const _fix=fixOpen;fixOpen=function(){_fix.apply(this,arguments);const o=$("fxO"
 window.fixAI=async function(){const c=S.cur,mc=c.type=="mcq",r=$("fxAIr"),b=$("fxAI");if(!c||!AI)return;b.disabled=true;r.textContent="🤖 点検中…";
  try{const x=await AI.json(`${AIRULE}\n次の試験対策カードを点検し、医学的な誤り・答えのズレ・文字起こしの聞き間違い/変換ミス・不自然な日本語を直す。正しければ変えない。\n問題：${$("fxQ").value}\n${mc?"選択肢："+c.opts.map((o,i)=>i+":"+o).join(" / ")+"\n現在の正解番号："+$("fxA").value:"答え："+$("fxA").value}\n解説：${$("fxE").value}\nJSONのみ出力：{"ok":true/false,"q":"直した問題文","a":${mc?"正解の番号(数値)":"\"直した答え\""},"exp":"直した解説","why":"何を直したか（短く）"}`);
   if(x.q)$("fxQ").value=x.q;if(x.a!=null&&x.a!=="")$("fxA").value=x.a;if(x.exp!=null)$("fxE").value=x.exp;r.innerHTML=(x.ok?"✅ 問題なさそうです。":"✏ 修正案を入れました（確認して「保存」）：")+esc(x.why||"")+(GEM.last&&AI===GEM?`<span style="opacity:.6">（${GEM.last}）</span>`:"")}catch(e){r.textContent="AIを使えませんでした（"+(e.message||"")+"）"}b.disabled=false};
+
+// --- GitHub版の「📥 資料を送る」：無料AIでその場で問題を作る ---
+const IA={busy:false};
+const KIND={tr:"授業の文字起こし",re:"レジメ・講義資料",ka:"過去問",ot:"その他の資料"};
+function chunks(t,n=9000){const out=[];t=t.replace(/\r/g,"").trim();while(t.length>n){let k=t.lastIndexOf("\n",n);if(k<n*.6)k=t.lastIndexOf("。",n)+1;if(k<n*.6)k=n;out.push(t.slice(0,k));t=t.slice(k).trim()}if(t)out.push(t);return out}
+async function fileToParts(f,d){const ext=f.name.split(".").pop().toLowerCase(),R={text:"",imgs:[]};
+ if(f.type.startsWith("image/")){const u=await rfile(f,"readAsDataURL");R.imgs.push(await shrink(u));await addFig(d,u)}
+ else if(/^(txt|md|csv|vtt|srt)$/.test(ext))R.text=await rfile(f,"readAsText");
+ else if(ext=="pdf"){await loadPdfjs();const pdf=await pdfjsLib.getDocument({data:await rfile(f,"readAsArrayBuffer")}).promise;
+  for(let i=1;i<=pdf.numPages;i++){const pg=await pdf.getPage(i);const tc=await pg.getTextContent();const t=tc.items.map(x=>x.str).join(" ").trim();
+   const vp=pg.getViewport({scale:1.5}),c=document.createElement("canvas");c.width=vp.width;c.height=vp.height;await pg.render({canvasContext:c.getContext("2d"),viewport:vp}).promise;const u=c.toDataURL("image/jpeg",.72);await addFig(d,u);
+   if(t.length>40)R.text+=`\n[p.${i}] ${t}`;else if(R.imgs.length<12)R.imgs.push(u)}}
+ else if(ext=="pptx"||ext=="docx"){await loadZip();const z=await JSZip.loadAsync(await rfile(f,"readAsArrayBuffer"));
+  if(ext=="pptx"){const sl=Object.keys(z.files).filter(k=>/^ppt\/slides\/slide\d+\.xml$/.test(k)).sort((a,b)=>+a.match(/\d+/)[0]-+b.match(/\d+/)[0]);for(const k of sl){const x=await z.file(k).async("string");const t=[...x.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m=>m[1]).join(" ").trim();if(t)R.text+="\n"+t}}
+  else{const x=await z.file("word/document.xml").async("string");R.text=x.split(/<\/w:p>/).map(pp=>[...pp.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map(m=>m[1]).join("")).filter(t=>t.trim()).join("\n")}}
+ else if(ext=="zip"){await loadZip();const z=await JSZip.loadAsync(await rfile(f,"readAsArrayBuffer"));
+  for(const k of Object.keys(z.files)){if(z.files[k].dir||/__MACOSX|\/\./.test(k))continue;const b=await z.file(k).async("blob");const nm=k.split("/").pop();const ty=/\.(png|jpe?g)$/i.test(nm)?"image/jpeg":"";const r=await fileToParts(new File([b],nm,{type:ty}),d);R.text+=r.text?`\n### ${nm}\n${r.text}`:"";R.imgs.push(...r.imgs)}}
+ R.imgs=R.imgs.slice(0,12);return R}
+const _inbox=inbox;inbox=async function(){if(window.claude?.use)return _inbox.apply(this,arguments);
+ const subs=[...new Set(subjNames())],cur=csOn()?(subjects().find(x=>x.id==csOn())||{}).name:"";const ok=AI===GEM;
+ app.innerHTML=`<div class="top"><button class="s" onclick="go('home')">← ホーム</button></div><h1>📥 資料を送る</h1>
+<div class="card"><p class="sub" style="margin:0 0 8px">文字起こし・レジメ・過去問を入れると、<b>無料AIがその場で問題を作ります</b>（Claude不要）。長い資料は自動で分けて全部読みます。</p>
+${ok?"":`<p style="color:var(--warn);margin:0 0 8px">⚠ 無料AIのキーが未設定です。設定画面の「🤖 無料AI」でキーを入れてください。</p>`}
+<div class="sub" style="margin:4px 0 2px">科目</div><select id="iaS" onchange="$('iaN').style.display=this.value=='+'?'':'none'">${subs.map(n=>`<option ${n==cur?"selected":""}>${esc(n)}</option>`).join("")}<option value="+">＋ 新しい科目</option></select>
+<input id="iaN" placeholder="新しい科目名" style="display:${subs.length?"none":""};margin-top:6px">
+<div class="sub" style="margin:8px 0 2px">範囲名</div><input id="iaD" placeholder="例：第5回 文字起こし" value="${esc(S.lastDn||"")}">
+<div class="row" style="gap:6px;margin-top:8px"><span class="sub" style="margin:0">種類</span><select id="iaK" style="width:auto">${Object.entries(KIND).map(([k,v])=>`<option value="${k}">${v}</option>`).join("")}</select><span class="sub" style="margin:0">重要度</span><select id="iaI" style="width:auto"><option>S</option><option selected>A</option><option>B</option><option>C</option></select></div>
+<div class="sub" style="margin:8px 0 2px">文章を貼る（文字起こしなど）</div><textarea id="iaT" rows="6" placeholder="ここに貼り付け"></textarea>
+<div class="sub" style="margin:8px 0 2px">ファイル（PDF・写真・PowerPoint・Word・テキスト・ZIP、複数可）</div><input id="iaF" type="file" multiple accept=".pdf,.pptx,.docx,.txt,.md,.zip,image/*">
+<button class="big p" style="margin-top:10px" onclick="iaRun()" ${ok?"":"disabled"}>🤖 AIで問題を作る</button><div id="iaR" class="sub" style="margin-top:6px;white-space:pre-line"></div></div>`};
+window.iaRun=async function(){if(IA.busy)return;const r=$("iaR");let sn=$("iaS").value;if(sn=="+"||!sn)sn=$("iaN").value.trim();const dn=$("iaD").value.trim()||"範囲1",kind=$("iaK").value,imp=$("iaI").value;
+ const files=[...$("iaF").files],paste=$("iaT").value.trim();if(!sn)return toast("科目を選んでください");if(!paste&&!files.length)return toast("文章かファイルを入れてください");
+ IA.busy=true;S.lastDn=dn;const d=getDeck(sn,dn,imp);let text=paste,imgs=[];
+ try{for(const f of files){r.textContent="📄 "+f.name+" を読み込み中…";const x=await fileToParts(f,d);if(x.text)text+=`\n### ${f.name}\n${x.text}`;imgs.push(...x.imgs)}
+  if(text.trim())d.text=((d.text||"")+"\n"+text).trim();save();
+  const note=kind=="tr"?"これは授業の文字起こしで、聞き間違い・変換ミスを含む。文脈から正しい医学用語に直してカード化し、直したか自信がない箇所は解説に「⚠要確認」と書く。雑談や連絡事項は無視。":kind=="ka"?"これは過去問。問題ごとにカード化し、選択肢があれば type:\"mcq\",opts,ans(0始まりの番号) で出力。正解が資料にない場合は解説に「⚠要確認」。":"";
+  const parts=chunks(text),jobs=parts.map(t=>({t}));for(let i=0;i<imgs.length;i+=4)jobs.push({im:imgs.slice(i,i+4)});
+  const all=[],fails=[];
+  for(let i=0;i<jobs.length;i++){r.textContent=`🤖 問題を作成中… ${i+1}/${jobs.length}`+(fails.length?`（失敗 ${fails.length}）`:"");const j=jobs[i];
+   try{const c=await AI.json(`${AIRULE}\n次の${KIND[kind]}${j.im?"（画像）":`（${i+1}/${parts.length}部分）`}から試験対策カードを作成。${note}${CARDJSON}${j.t?"\n---\n"+j.t:""}`,j.im?{images:j.im}:{});if(Array.isArray(c))all.push(...c)}
+   catch(e){fails.push(i+1);if(e.code=="all"||e.code=="no_key"){r.textContent="❌ "+e.message;break}}}
+  const seen=new Set,uniq=all.filter(c=>{const k=String(c.q||"").replace(/\s/g,"");if(!k||seen.has(k))return false;seen.add(k);return true});
+  if(!uniq.length){r.textContent=(r.textContent.startsWith("❌")?r.textContent+"\n":"")+"❌ 問題を作れませんでした。少し時間をおいてもう一度試してください（読み込んだ資料は範囲に保存済み）";IA.busy=false;return}
+  IA.busy=false;preview(sn,dn,imp,uniq);if(fails.length)toast(fails.length+"か所は作れませんでした（混雑など）")}
+ catch(e){r.textContent="❌ 読み込めませんでした（"+(e.message||e)+"）"}IA.busy=false};
 })();
